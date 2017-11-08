@@ -1,0 +1,8 @@
+ai_players:
+- name: callbot
+  path: /Users/neel/pokerbot/callbot.py
+ante: 0
+blind_structure: null
+initial_stack: 100
+max_round: 10
+small_blind: 10
