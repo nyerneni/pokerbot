@@ -2,7 +2,7 @@ from pypokerengine.players import BasePokerPlayer
 from pypokerengine.utils.card_utils import gen_cards, estimate_hole_card_win_rate
 NB_SIMULATION = 1000
 
-class HonestPlayer(BasePokerPlayer):
+class LoosePlayer(BasePokerPlayer):
 
     def declare_action(self, valid_actions, hole_card, round_state):
         community_card = round_state['community_card']
@@ -19,17 +19,18 @@ class HonestPlayer(BasePokerPlayer):
 
         amount = valid_actions[1]['amount']
         action = valid_actions[0]
-        if win_rate >= .85:
+        if win_rate >= .6:
             action = valid_actions[2]
             amount = valid_actions[2]['amount']['max']
-        elif win_rate >= .7:
+        elif win_rate >= .5:
             action = valid_actions[2]
             amount = valid_actions[2]['amount']['min']# fetch FOLD action info
-        elif win_rate >= 1.0 / self.nb_player:
+        elif win_rate >= .3:
             action = valid_actions[1]
         elif callbool == True and amount == 0:
             action = valid_actions[1]
-
+        if amount < 0 or action['action'] == 'fold':
+            amount = 0
         return action['action'], amount
 
     def receive_game_start_message(self, game_info):
