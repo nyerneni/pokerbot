@@ -1,6 +1,9 @@
 '''
 File: qlearn.py
 '''
+import collections
+
+NUM_TRACKED = 7
 
 # Abstract class: an RLAlgorithm performs reinforcement learning.  All it needs
 # to know is the set of available actions to take.  The simulator (see
@@ -78,7 +81,138 @@ def pokerFeatureExtractor(state, action):
     Ideas: indicators for stack size (buckets), opponent's last 5 actions,
             probability of hand winning (bucketed)
     '''
-    pass
+
+    """
+    game_state = {
+            "round_count": 0,
+            "small_blind_amount": self.game_rule["sb_amount"],
+            "street": Const.Street.PREFLOP,
+            "next_player": None,
+            "table": table
+        }
+
+    table:
+        self.dealer_btn = 0
+        self._blind_pos = None
+        self.seats = Seats()
+        self.deck = cheat_deck if cheat_deck else Deck()
+        self._community_card = []
+
+    to access players: table.seats.players (list of players)
+
+    player:
+        self.name = name
+        self.uuid = uuid
+        self.hole_card = []
+        self.stack = initial_stack
+        self.round_action_histories = self.__init_round_action_histories()
+        self.action_histories = []
+        self.pay_info = PayInfo()
+
+    action = {"action": "fold/call/raise", "amount": 0}
+
+    """
+
+    # features that need no processing
+    street = state["street"]
+    action_name = action["action"]
+
+    players = state["table"].seats.players
+    isEnd = check_end_state(players)
+
+    # features that need to be processed
+    odds = get_win_prob(state)
+    opponent_history = players[1].round_action_histories
+    agent_stack = players[0].stack
+    # opp_stack = players[1].stack
+    pot_size = players[0].pay_info.amount + players[1].pay_info.amount
+
+    # processed features and feature vector
+    feature_pairs = []
+    feature_pairs.append(((street, action_name), 1))
+    pot_feature = bucket_pot(agent_stack, pot_size)
+    feature_pairs.append(((pot_feature, action_name), 1))
+    history_feature = process_history(opponent_history)
+    feature_pairs.append(((history_feature, action_name), 1))
+
+    if not isEnd:
+        odds_feature = bucket_odds(odds)
+        feature_pairs.append(((odds_feature, action_name), 1))
+
+    return feature_pairs
+
+
+def bucket_odds(odds):
+    if odds <= .1:
+        return "odds10"
+    elif odds <= .2:
+        return "odds20"
+    elif odds <= .3:
+        return "odds30"
+    elif odds <= .4:
+        return "odds40"
+    elif odds <= .5:
+        return "odds50"
+    elif odds <= .6:
+        return "odds60"
+    elif odds <= .7:
+        return "odds70"
+    elif odds <= .8:
+        return "odds80"
+    elif odds <= .9:
+        return "odds90"
+    else:
+        return "instantwin"
+
+
+def process_history(history):
+    temp_histories = list(reversed(history[-1:-8:-1]))
+    actions = [entry["action"] for entry in temp_histories]
+    while len(actions) < NUM_TRACKED:
+        actions.append(None)
+    counts = collections.defaultdict(int)
+    majority_action, count = None, 0
+    for action in actions:
+        counts[action] += 1
+        if counts[action] > count:
+            count = counts[action]
+            majority_action = action
+    return majority_action
+
+
+def bucket_pot(pot):
+    if not stack: return "nopot"
+
+    if pot <= 50:
+        return "pot50"
+    elif pot <= 100:
+        return "pot100"
+    elif pot <= 150:
+        return "pot150"
+    elif pot <= 250:
+        return "pot250"
+    elif pot <= 350:
+        return "pot350"
+    elif pot <= 500:
+        return "pot500"
+    elif pot <= 650:
+        return "pot650"
+    elif pot <= 800:
+        return "pot800"
+    else:
+        return "bigkahuna"
+
+
+def check_end_state(players):
+    '''
+    End state if either player has 0 and sthe river has ended, or a player has folded
+    '''
+    stack1, stack2 = players[0].stack, players[1].stack
+    actions1, actions2 = players[0].action_histories, players[1].action_histories
+
+    return (not stack1 or not stack2 or \
+        actions1[-1]["action"] == "fold" or actions2[-1]["action"] == "fold")
+
 
 # Perform |numTrials| of the following:
 # On each trial, take the MDP |mdp| and an RLAlgorithm |rl| and simulates the
