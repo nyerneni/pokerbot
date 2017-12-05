@@ -16,7 +16,6 @@ class TightPlayer(BasePokerPlayer):
         if 'call' in valid_actions[1]['action']:
             callbool = True
         else: callbool = False
-        print round_state
         amount = valid_actions[1]['amount']
         action = valid_actions[0]
         if win_rate >= .85:

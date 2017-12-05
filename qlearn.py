@@ -1,7 +1,10 @@
 '''
 File: qlearn.py
 '''
-import collections
+import math, random, copy
+from collections import defaultdict
+from pypokerengine.utils.card_utils import gen_cards, estimate_hole_card_win_rate
+import pypokerengine.engine.poker_constants as Const
 
 NUM_TRACKED = 7
 
@@ -12,7 +15,12 @@ NUM_TRACKED = 7
 # its parameters.
 class RLAlgorithm:
     # Your algorithm will be asked to produce an action given a state.
-    def getAction(self, state): raise NotImplementedError("Override me")
+    def getAction(self, state):
+        self.numIters += 1
+        if random.random() < self.explorationProb:
+            return random.choice(self.actions(state))
+        else:
+            return max((self.getQ(state, action), action) for action in self.actions(state))[1]
 
     # We will call this function when simulating an MDP, and you should update
     # parameters.
@@ -20,8 +28,15 @@ class RLAlgorithm:
     # 0, None). When this function is called, it indicates that taking action
     # |action| in state |state| resulted in reward |reward| and a transition to state
     # |newState|.
-    def incorporateFeedback(self, state, action, reward, newState): raise NotImplementedError("Override me")
-
+    def incorporateFeedback(self, state, action, reward, newState):
+        eta = self.getStepSize()
+        Q = self.getQ(state, action)
+        if newState == None: return
+        Vopt = max((self.getQ(newState,a)) for a in self.actions(newState))
+        scale = eta*(Q - (reward + self.discount*Vopt))
+        for key, value in self.featureExtractor(state, action):
+            if key in self.weights:
+                self.weights[key] -= scale*value
 
 class QLearningAlgorithm(RLAlgorithm):
 
@@ -34,21 +49,21 @@ class QLearningAlgorithm(RLAlgorithm):
         self.numIters = 0
 
     # Return the Q function associated with the weights and features
-    def getQ(self, state, action):
+    def getQ(self, state, action, agentId):
         score = 0
-        for f, v in self.featureExtractor(state, action):
+        for f, v in self.featureExtractor(state, action, agentId):
             score += self.weights[f] * v
         return score
 
     # This algorithm will produce an action given a state.
     # Here we use the epsilon-greedy algorithm: with probability
     # |explorationProb|, take a random action.
-    def getAction(self, state):
+    def getAction(self, state, agentId):
         self.numIters += 1
         if random.random() < self.explorationProb:
             return random.choice(self.actions(state))
         else:
-            return max((self.getQ(state, action), action) for action in self.actions(state))[1]
+            return max((self.getQ(state, action, agentId), action) for action in self.actions(state))[1]
 
     # Call this function to get the step size to update the weights.
     def getStepSize(self):
@@ -58,7 +73,7 @@ class QLearningAlgorithm(RLAlgorithm):
     # Note that if s is a terminal state, then s' will be None.  Remember to check for this.
     # You should update the weights using self.getStepSize(); use
     # self.getQ() to compute the current estimate of the parameters.
-    def incorporateFeedback(self, state, action, reward, newState):
+    def incorporateFeedback(self, state, action, reward, newState, agentId):
 
         # on each (s,a,r,s'):
         # w = w - eta(Qopt(s,a;w) - (r+ gamma * Vopt(s'))) * featurevector(s,a)
@@ -66,16 +81,16 @@ class QLearningAlgorithm(RLAlgorithm):
         if not newState:
             return
         else:
-            v_opt = max([self.getQ(newState, act) for act in self.actions(newState)])
+            v_opt = max([self.getQ(newState, act, agentId) for act in self.actions(newState)])
 
-        q_opt = self.getQ(state, action)
+        q_opt = self.getQ(state, action, agentId)
         factor = self.getStepSize() * (q_opt - (reward + self.discount * v_opt))
-        for f, v in self.featureExtractor(state, action):
+        for f, v in self.featureExtractor(state, action, agentId):
             update = factor * v
             self.weights[f] -= update
 
 
-def pokerFeatureExtractor(state, action):
+def pokerFeatureExtractor(state, action, agentId):
     '''
     TODO
     Ideas: indicators for stack size (buckets), opponent's last 5 actions,
@@ -116,21 +131,22 @@ def pokerFeatureExtractor(state, action):
     # features that need no processing
     street = state["street"]
     action_name = action["action"]
-
     players = state["table"].seats.players
-    isEnd = check_end_state(players)
+    agent = [player for player in players if player.uuid == agentId][0]
+    opponent = [player for player in players if player.uuid != agentId][0]
+    isEnd = check_end_state(players, street)
 
     # features that need to be processed
-    odds = get_win_prob(state)
-    opponent_history = players[1].round_action_histories
-    agent_stack = players[0].stack
-    # opp_stack = players[1].stack
+    odds = 1 if isEnd else get_win_prob(state["table"])
+    opponent_history = opponent.round_action_histories
+    # agent_stack = agent.stack
+    # opp_stack = opponent.stack
     pot_size = players[0].pay_info.amount + players[1].pay_info.amount
 
     # processed features and feature vector
     feature_pairs = []
     feature_pairs.append(((street, action_name), 1))
-    pot_feature = bucket_pot(agent_stack, pot_size)
+    pot_feature = bucket_pot(pot_size)
     feature_pairs.append(((pot_feature, action_name), 1))
     history_feature = process_history(opponent_history)
     feature_pairs.append(((history_feature, action_name), 1))
@@ -141,36 +157,26 @@ def pokerFeatureExtractor(state, action):
 
     return feature_pairs
 
+def get_win_prob(table):
+    if table.seats.players[0].hole_card == []:
+        return 0
+    return estimate_hole_card_win_rate(nb_simulation = 1000, nb_player=2, hole_card = table.seats.players[0].hole_card, community_card = table._community_card)
+
 
 def bucket_odds(odds):
-    if odds <= .1:
-        return "odds10"
-    elif odds <= .2:
-        return "odds20"
-    elif odds <= .3:
-        return "odds30"
-    elif odds <= .4:
-        return "odds40"
-    elif odds <= .5:
-        return "odds50"
-    elif odds <= .6:
-        return "odds60"
-    elif odds <= .7:
-        return "odds70"
-    elif odds <= .8:
-        return "odds80"
-    elif odds <= .9:
-        return "odds90"
+    if odds <= .9:
+        num = str((odds * 100) // 10)
+        return "odds"+num
     else:
         return "instantwin"
 
 
 def process_history(history):
     temp_histories = list(reversed(history[-1:-8:-1]))
-    actions = [entry["action"] for entry in temp_histories]
+    actions = [entry[0]["action"] for entry in temp_histories if entry is not None]
     while len(actions) < NUM_TRACKED:
         actions.append(None)
-    counts = collections.defaultdict(int)
+    counts = defaultdict(int)
     majority_action, count = None, 0
     for action in actions:
         counts[action] += 1
@@ -181,8 +187,6 @@ def process_history(history):
 
 
 def bucket_pot(pot):
-    if not stack: return "nopot"
-
     if pot <= 50:
         return "pot50"
     elif pot <= 100:
@@ -203,59 +207,13 @@ def bucket_pot(pot):
         return "bigkahuna"
 
 
-def check_end_state(players):
+def check_end_state(players, street):
     '''
     End state if either player has 0 and sthe river has ended, or a player has folded
     '''
     stack1, stack2 = players[0].stack, players[1].stack
     actions1, actions2 = players[0].action_histories, players[1].action_histories
-
-    return (not stack1 or not stack2 or \
-        actions1[-1]["action"] == "fold" or actions2[-1]["action"] == "fold")
-
-
-# Perform |numTrials| of the following:
-# On each trial, take the MDP |mdp| and an RLAlgorithm |rl| and simulates the
-# RL algorithm according to the dynamics of the MDP.
-# Each trial will run for at most |maxIterations|.
-# Return the list of rewards that we get for each trial.
-def simulate(mdp, rl, numTrials=10, maxIterations=1000, verbose=False,
-             sort=False):
-    # Return i in [0, ..., len(probs)-1] with probability probs[i].
-    def sample(probs):
-        target = random.random()
-        accum = 0
-        for i, prob in enumerate(probs):
-            accum += prob
-            if accum >= target: return i
-        raise Exception("Invalid probs: %s" % probs)
-
-    totalRewards = []  # The rewards we get on each trial
-    for trial in range(numTrials):
-        state = mdp.startState()
-        sequence = [state]
-        totalDiscount = 1
-        totalReward = 0
-        for _ in range(maxIterations):
-            action = rl.getAction(state)
-            transitions = mdp.succAndProbReward(state, action)
-            if sort: transitions = sorted(transitions)
-            if len(transitions) == 0:
-                rl.incorporateFeedback(state, action, 0, None)
-                break
-
-            # Choose a random transition
-            i = sample([prob for newState, prob, reward in transitions])
-            newState, prob, reward = transitions[i]
-            sequence.append(action)
-            sequence.append(reward)
-            sequence.append(newState)
-
-            rl.incorporateFeedback(state, action, reward, newState)
-            totalReward += totalDiscount * reward
-            totalDiscount *= mdp.discount()
-            state = newState
-        if verbose:
-            print "Trial %d (totalReward = %s): %s" % (trial, totalReward, sequence)
-        totalRewards.append(totalReward)
-    return totalRewards
+    return ((stack1 == 0 and street == 5) or \
+            (stack2 == 0 and street == 5) or \
+            0 if len(actions1) == 0 else actions1[-1]["action"] == "fold" or
+            0 if len(actions2) == 0 else actions2[-1]["action"] == "fold")
