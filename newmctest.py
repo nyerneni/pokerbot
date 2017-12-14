@@ -32,8 +32,8 @@ def builddistr(amount, discount, stack, hand):
             if j == hand
             hand = [Card(i, 1), Card(j, 1)]
             hand2 = [Card(i, 1), Card(j, 2)]
-            val = math.exp(HandEvaluator2.evaluate_hand(hand, [])*(amount/100)+4) * (count/4)
-            val2 = math.exp(HandEvaluator2.evaluate_hand(hand2, [])*(amount/100)+4) * (count/4)
+            val = math.exp(HandEvaluator2.evaluate_hand(hand, [])*(amount/100000)+5) * (count/4)
+            val2 = math.exp(HandEvaluator2.evaluate_hand(hand2, [])*(amount/100000)+5) * (count/4)
             lookuptable[(i,j, 1)] = val
             lookuptable[(i,j, 0)] = val2
 
